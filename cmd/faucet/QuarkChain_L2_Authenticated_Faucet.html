@@ -125,7 +125,7 @@
 			};
 			
 			var reconnect = function() {
-				server = new WebSocket("ws://65.109.20.29:81/api");
+				server = new WebSocket("wss://faucet.worldsuper.computer/api");
 
 				server.onmessage = function(event) {
 					var msg = JSON.parse(event.data);
