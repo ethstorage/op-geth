@@ -248,6 +248,10 @@ const (
 
 	// OP-Geth specific
 	BalanceMint BalanceChangeReason = 200
+
+	// swc specific
+	BalanceSgtToValue BalanceChangeReason = 255
+	BalanceValueToSgt BalanceChangeReason = 254
 )
 
 // GasChangeReason is used to indicate the reason for a gas change, useful

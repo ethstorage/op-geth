@@ -230,6 +230,8 @@ type StateTransition struct {
 	state        vm.StateDB
 	evm          *vm.EVM
 
+	// nil means no SGT is converted for msg.value
+	convertedSgtAsValueAmount *uint256.Int
 	// nil means SGT is not used at all
 	usedSGTBalance *uint256.Int
 	// should not be used if usedSGTBalance is nil;
@@ -334,25 +336,78 @@ func (st *StateTransition) to() common.Address {
 	return *st.msg.To
 }
 
-const (
-	// should keep it in sync with the balances field of SoulGasToken contract
-	BalancesSlot = uint64(51)
-)
-
 var (
-	slotArgs abi.Arguments
+	// should keep it in sync with the balances field of SoulGasToken contract
+	balancesSlot      = new(big.Int).SetUint64(51)
+	allowSgtValueSlot *big.Int
+	slotArgs          abi.Arguments
 )
 
 func init() {
-	uint64Ty, _ := abi.NewType("uint64", "", nil)
+	uint256Ty, _ := abi.NewType("uint256", "", nil)
 	addressTy, _ := abi.NewType("address", "", nil)
-	slotArgs = abi.Arguments{{Name: "addr", Type: addressTy, Indexed: false}, {Name: "slot", Type: uint64Ty, Indexed: false}}
+	slotArgs = abi.Arguments{{Name: "addr", Type: addressTy, Indexed: false}, {Name: "slot", Type: uint256Ty, Indexed: false}}
+
+	// should keep in sync with _SOULGASTOKEN_STORAGE_LOCATION of SoulGasToken contract
+	structSlot, ok := new(big.Int).SetString("135c38e215d95c59dcdd8fe622dccc30d04cacb8c88c332e4e7441bac172dd00", 16)
+	if !ok {
+		panic("invalid struct slot")
+	}
+	// should keep it in sync with the _allowSgtValue field of SoulGasToken contract
+	allowSgtValueSlot = new(big.Int).Add(structSlot, new(big.Int).SetUint64(2))
+}
+
+func TargetAllowSgtValueSlot(to common.Address) (slot common.Hash) {
+	data, _ := slotArgs.Pack(to, allowSgtValueSlot)
+	slot = crypto.Keccak256Hash(data)
+	return
 }
 
 func TargetSGTBalanceSlot(account common.Address) (slot common.Hash) {
-	data, _ := slotArgs.Pack(account, BalancesSlot)
+	data, _ := slotArgs.Pack(account, balancesSlot)
 	slot = crypto.Keccak256Hash(data)
 	return
+}
+
+func (st *StateTransition) convertSgtToNative(from common.Address, value *big.Int) error {
+	if value == nil || value.Sign() == 0 {
+		return nil
+	}
+	valueU256, overflow := uint256.FromBig(st.msg.Value)
+	if overflow {
+		return fmt.Errorf("msg.Value exceeds 256 bits:%v", st.msg.Value)
+	}
+
+	convertAmount := st.GetSoulBalance(from)
+	if convertAmount.Cmp(valueU256) > 0 {
+		convertAmount = valueU256
+	}
+
+	st.subSoulBalance(from, convertAmount, tracing.BalanceSgtToValue)
+	st.state.AddBalance(from, convertAmount, tracing.BalanceSgtToValue)
+	st.convertedSgtAsValueAmount = convertAmount
+	return nil
+}
+
+func (st *StateTransition) recoverSgt(from common.Address) {
+	if st.convertedSgtAsValueAmount == nil {
+		return
+	}
+
+	st.addSoulBalance(from, st.convertedSgtAsValueAmount, tracing.BalanceValueToSgt)
+	st.state.SubBalance(from, st.convertedSgtAsValueAmount, tracing.BalanceValueToSgt)
+	st.convertedSgtAsValueAmount = nil
+}
+
+func (st *StateTransition) isSgtAsValueEnabled(to common.Address) bool {
+	if !(st.evm.ChainConfig().IsOptimism() && st.evm.ChainConfig().Optimism.IsSoulBackedByNative) {
+		return false
+	}
+	slot := TargetAllowSgtValueSlot(to)
+	value := st.state.GetState(types.SoulGasTokenAddr, slot)
+	valueInt := new(uint256.Int)
+	valueInt.SetBytes(value[:])
+	return !valueInt.IsZero()
 }
 
 func (st *StateTransition) GetSoulBalance(account common.Address) *uint256.Int {
@@ -398,7 +453,7 @@ func GetGasBalancesInBig(state vm.StateDB, chainconfig *params.ChainConfig, acco
 	return bal.ToBig(), sgtBal.ToBig()
 }
 
-// called by buyGas
+// called by buyGas/convertSgtToNative
 func (st *StateTransition) subSoulBalance(account common.Address, amount *uint256.Int, reason tracing.BalanceChangeReason) (err error) {
 	current := st.GetSoulBalance(account)
 	if current.Cmp(amount) < 0 {
@@ -415,7 +470,7 @@ func (st *StateTransition) subSoulBalance(account common.Address, amount *uint25
 	return
 }
 
-// called by refundGas
+// called by refundGas/recoverSgt
 func (st *StateTransition) addSoulBalance(account common.Address, amount *uint256.Int, reason tracing.BalanceChangeReason) {
 	current := st.GetSoulBalance(account)
 	value := current.Add(current, amount).Bytes32()
@@ -427,6 +482,13 @@ func (st *StateTransition) addSoulBalance(account common.Address, amount *uint25
 }
 
 func (st *StateTransition) buyGas() error {
+
+	if st.msg.To != nil && st.isSgtAsValueEnabled(*st.msg.To) {
+		if err := st.convertSgtToNative(st.msg.From, st.msg.Value); err != nil {
+			return err
+		}
+	}
+
 	mgval := new(big.Int).SetUint64(st.msg.GasLimit)
 	mgval.Mul(mgval, st.msg.GasPrice)
 	var l1Cost *big.Int
@@ -671,7 +733,13 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 	return result, err
 }
 
-func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
+func (st *StateTransition) innerTransitionDb() (result *ExecutionResult, err error) {
+	defer func() {
+		if err != nil || result.Err != nil {
+			// when error happened, we want to rollback sgt as msg.value
+			st.recoverSgt(st.msg.From)
+		}
+	}()
 	// First check this message satisfies all consensus rules before
 	// applying the message. The rules include these clauses
 	//
