@@ -56,7 +56,7 @@
 			<div class="container">
 				<div class="row" style="margin-bottom: 16px;">
 					<div class="col-lg-12">
-						<h1 style="text-align: center;"><i class="fa fa-bath" aria-hidden="true"></i> Super World Computer: Alpha Testnet Authenticated Faucet</h1>
+						<h1 style="text-align: center;"><i class="fa fa-bath" aria-hidden="true"></i> Super World Computer: Beta Testnet Authenticated Faucet</h1>
 					</div>
 				</div>
 				<div class="row">
@@ -125,7 +125,7 @@
 			};
 			
 			var reconnect = function() {
-				server = new WebSocket("wss://faucet.testnet.l2.quarkchain.io:81/api");
+				server = new WebSocket("wss://faucet.beta.testnet.l2.quarkchain.io:81/api");
 
 				server.onmessage = function(event) {
 					var msg = JSON.parse(event.data);
