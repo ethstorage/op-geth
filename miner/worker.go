@@ -396,7 +396,7 @@ func (miner *Miner) commitBlobTransaction(env *environment, tx *types.Transactio
 	// isn't really a better place right now. The blob gas limit is checked at block validation time
 	// and not during execution. This means core.ApplyTransaction will not return an error if the
 	// tx has too many blobs. So we have to explicitly check it here.
-	if (env.blobs+len(sc.Blobs))*params.BlobTxBlobGasPerBlob > params.MaxBlobGasPerBlock {
+	if (env.blobs+len(tx.BlobHashes()))*params.BlobTxBlobGasPerBlob > params.MaxBlobGasPerBlock {
 		return errors.New("max data blobs reached")
 	}
 	receipt, err := miner.applyTransaction(env, tx)
