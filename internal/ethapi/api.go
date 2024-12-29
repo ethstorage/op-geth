@@ -688,8 +688,8 @@ func (api *BlockChainAPI) GetBalance(ctx context.Context, address common.Address
 	if state == nil || err != nil {
 		return nil, err
 	}
-	b := state.GetBalance(address).ToBig()
-	return (*hexutil.Big)(b), state.Error()
+	nativeBalance, sgtBalance := core.GetGasBalancesInBig(state, api.b.ChainConfig(), address)
+	return (*hexutil.Big)(new(big.Int).Add(nativeBalance, sgtBalance)), state.Error()
 }
 
 // AccountResult structs for GetProof
