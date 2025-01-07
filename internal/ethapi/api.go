@@ -638,12 +638,18 @@ func (api *PersonalAccountAPI) Unpair(ctx context.Context, url string, pin strin
 
 // BlockChainAPI provides an API to access Ethereum blockchain data.
 type BlockChainAPI struct {
-	b Backend
+	b   Backend
+	sgt bool
 }
 
 // NewBlockChainAPI creates a new Ethereum blockchain API.
 func NewBlockChainAPI(b Backend) *BlockChainAPI {
-	return &BlockChainAPI{b}
+	return &BlockChainAPI{b, false}
+}
+
+// NewBlockChainAPIForSGT creates a new Ethereum blockchain API for SGT.
+func NewBlockChainAPIForSGT(b Backend) *BlockChainAPI {
+	return &BlockChainAPI{b, true}
 }
 
 // ChainId is the EIP-155 replay-protection chain id for the current Ethereum chain config.
@@ -687,6 +693,10 @@ func (api *BlockChainAPI) GetBalance(ctx context.Context, address common.Address
 	state, _, err := api.b.StateAndHeaderByNumberOrHash(ctx, blockNrOrHash)
 	if state == nil || err != nil {
 		return nil, err
+	}
+	if !api.sgt {
+		b := state.GetBalance(address).ToBig()
+		return (*hexutil.Big)(b), state.Error()
 	}
 	nativeBalance, sgtBalance := core.GetGasBalancesInBig(state, api.b.ChainConfig(), address)
 	return (*hexutil.Big)(new(big.Int).Add(nativeBalance, sgtBalance)), state.Error()
