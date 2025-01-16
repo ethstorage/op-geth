@@ -4,7 +4,7 @@ footer: |
   and execution-engine of the [SWC OP-stack](https://github.com/ethstorage/optimism).
 base:
   name: official op-geth
-  url: https://github.com/ethereum/go-ethereum
+  url: https://github.com/ethereum-optimism/op-geth
   hash: b84907bf4d9577c429208165653ab1566c45c53d
 fork:
   name: SWC op-geth
@@ -45,7 +45,7 @@ def:
 
         The block-building code (in the "miner" package because of Proof-Of-Work legacy of ethereum) is extended to ensure that,
         for blob transactions, the blobs are required when it's sequencing, but not required when it's deriving.
-        
+
         We also charge a minimum data-availability fee for each blob.
       globs:
         - "miner/worker.go"
